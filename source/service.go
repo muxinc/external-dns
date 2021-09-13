@@ -238,7 +238,7 @@ func (sc *serviceSource) Endpoints(ctx context.Context) ([]*endpoint.Endpoint, e
 }
 
 // extractHeadlessEndpoints extracts endpoints from a headless service using the "Endpoints" Kubernetes API resource
-func (sc *serviceSource) extractHeadlessEndpoints(svc *v1.Service, hostname string, ttl endpoint.TTL) []*endpoint.Endpoint {
+func (sc *serviceSource) extractHeadlessEndpoints(svc *v1.Service, hostname string, ttl endpoint.TTL, externalIP bool) []*endpoint.Endpoint {
 	var endpoints []*endpoint.Endpoint
 
 	labelSelector, err := metav1.ParseToLabelSelector(labels.Set(svc.Spec.Selector).AsSelectorPreValidated().String())
@@ -292,9 +292,28 @@ func (sc *serviceSource) extractHeadlessEndpoints(svc *v1.Service, hostname stri
 				headlessDomains = append(headlessDomains, fmt.Sprintf("%s.%s", pod.Spec.Hostname, hostname))
 			}
 
+		NextDomain:
 			for _, headlessDomain := range headlessDomains {
 				var ep string
-				if sc.publishHostIP {
+				if sc.publishHostIP && externalIP {
+					if pod.Status.Phase == v1.PodRunning {
+						node, err := sc.nodeInformer.Lister().Get(pod.Spec.NodeName)
+						if err != nil {
+							log.Errorf("Unable to find node where Pod %s is running: %v", pod.Spec.Hostname, err)
+							return nil
+						}
+						for _, a := range node.Status.Addresses {
+							if a.Type == v1.NodeExternalIP {
+								log.Debugf("Generating matching endpoint %s with NodeExternalIP %s", headlessDomain, a.Address)
+								targetsByHeadlessDomain[headlessDomain] = append(targetsByHeadlessDomain[headlessDomain], a.Address)
+								continue NextDomain
+							}
+						}
+					} else {
+						log.Debugf("Pod %s/%s is not running", pod.GetNamespace(), pod.GetName())
+						return nil
+					}
+				} else if sc.publishHostIP {
 					ep = pod.Status.HostIP
 					log.Debugf("Generating matching endpoint %s with HostIP %s", headlessDomain, ep)
 				} else {
@@ -462,7 +481,8 @@ func (sc *serviceSource) generateEndpoints(svc *v1.Service, hostname string, pro
 			targets = append(targets, extractServiceIps(svc)...)
 		}
 		if svc.Spec.ClusterIP == v1.ClusterIPNone {
-			endpoints = append(endpoints, sc.extractHeadlessEndpoints(svc, hostname, ttl)...)
+			externalIP := getExternalIPFromAnnotations(svc.Annotations)
+			endpoints = append(endpoints, sc.extractHeadlessEndpoints(svc, hostname, ttl, externalIP)...)
 		}
 	case v1.ServiceTypeNodePort:
 		// add the nodeTargets and extract an SRV endpoint
