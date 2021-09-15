@@ -50,6 +50,8 @@ const (
 	ttlAnnotationKey = "external-dns.alpha.kubernetes.io/ttl"
 	// The annotation used for switching to the alias record types e. g. AWS Alias records instead of a normal CNAME
 	aliasAnnotationKey = "external-dns.alpha.kubernetes.io/alias"
+	// The annotation used for having publishHostIP use the ExternalIP of the Host Node
+	externalIPAnnotationKey = "external-dns.alpha.kubernetes.io/use-external-host-ip"
 	// The annotation used to determine the source of hostnames for ingresses.  This is an optional field - all
 	// available hostname sources are used if not specified.
 	ingressHostnameSourceKey = "external-dns.alpha.kubernetes.io/ingress-hostname-source"
@@ -161,6 +163,11 @@ func getInternalHostnamesFromAnnotations(annotations map[string]string) []string
 
 func getAliasFromAnnotations(annotations map[string]string) bool {
 	aliasAnnotation, exists := annotations[aliasAnnotationKey]
+	return exists && aliasAnnotation == "true"
+}
+
+func getExternalIPFromAnnotations(annotations map[string]string) bool {
+	aliasAnnotation, exists := annotations[externalIPAnnotationKey]
 	return exists && aliasAnnotation == "true"
 }
 
